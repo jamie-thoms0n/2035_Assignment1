@@ -310,7 +310,97 @@ public class Protocol {
 	 * See coursework specification for full details.
 	 */
 	public void receiveWithAckLoss(DatagramSocket serverSocket, float loss)  {
-		System.exit(0);
+		int expectedSeqNum = 1;        // expect first DATA segment after META to be 1
+		int lastAckedSeqNum = 0;       // last valid DATA seq number
+		long totalBytesReceived = 0;   // includes retransmissions
+		long totalUsefulBytes = 0;     // only unique DATA
+		java.util.List<String> receivedLines = new java.util.ArrayList<>();
+	
+		try {
+			// 1. Exit after 2000 ms of no data
+			serverSocket.setSoTimeout(2000);
+	
+			while (true) {
+				try {
+					// 2. Receive a DATA segment
+					byte[] buffer = new byte[MAX_Segment_SIZE];
+					DatagramPacket pkt = new DatagramPacket(buffer, buffer.length);
+					serverSocket.receive(pkt);
+	
+					java.io.ByteArrayInputStream bais =
+							new java.io.ByteArrayInputStream(pkt.getData(), 0, pkt.getLength());
+					java.io.ObjectInputStream ois = new java.io.ObjectInputStream(bais);
+					Segment seg = (Segment) ois.readObject();
+					ois.close();
+					bais.close();
+	
+					if (seg.getType() != SegmentType.Data) continue;
+	
+					System.out.println("------------------------------------------------------------------");
+					System.out.println("SERVER: Receive: DATA [SEQ#" + seg.getSeqNum() + "]"
+							+ "(size:" + seg.getSize()
+							+ ", crc:" + seg.getChecksum()
+							+ ", content:" + seg.getPayLoad() + ")");
+	
+					long calc = seg.calculateChecksum();
+					System.out.println("SERVER: Calculated checksum is " + calc
+							+ (calc == seg.getChecksum() ? "  VALID" : "  INVALID"));
+					if (calc != seg.getChecksum()) continue;
+	
+					totalBytesReceived += seg.getSize();
+					InetAddress clientAddr = pkt.getAddress();
+					int clientPort = pkt.getPort();
+	
+					if (seg.getSeqNum() == expectedSeqNum) {
+						// --- NEW segment ---
+						receivedLines.add(seg.getPayLoad());
+						totalUsefulBytes += seg.getSize();
+	
+						if (!isLost(loss)) {
+							Server.sendAck(serverSocket, clientAddr, clientPort, seg.getSeqNum());
+						} else {
+							System.out.println("SERVER: ACK [SEQ#" + seg.getSeqNum() + "] lost intentionally");
+							System.out.println("------------------------------------------------");
+							System.out.println("------------------------------------------------");
+						}
+	
+						lastAckedSeqNum = seg.getSeqNum();
+						expectedSeqNum = 1 - expectedSeqNum;   // alternate 1↔0
+					} else {
+						// --- DUPLICATE segment ---
+						System.out.println("SERVER: Duplicate DATA [SEQ#" + seg.getSeqNum() + "] detected");
+						System.out.println("SERVER: Re-sending ACK [SEQ#" + lastAckedSeqNum + "] (may be lost)");
+	
+						if (!isLost(loss)) {
+							Server.sendAck(serverSocket, clientAddr, clientPort, lastAckedSeqNum);
+						} else {
+							System.out.println("SERVER: ACK [SEQ#" + lastAckedSeqNum + "] lost intentionally");
+							System.out.println("------------------------------------------------");
+							System.out.println("------------------------------------------------");
+						}
+					}
+	
+				} catch (java.net.SocketTimeoutException e) {
+					// --- 3. End of transfer ---
+					if (!receivedLines.isEmpty()) {
+						Server.writeReadingsToFile(receivedLines, outputFileName);
+					}
+	
+					double efficiency = (totalBytesReceived == 0)
+							? 100.0
+							: (totalUsefulBytes * 100.0) / (double) totalBytesReceived;
+	
+					System.out.printf("SERVER: Network efficiency = %.2f%%%n", efficiency);
+					return;
+	
+				} catch (ClassNotFoundException e) {
+					System.out.println("SERVER: Deserialization error: " + e.getMessage());
+				}
+			}
+	
+		} catch (IOException e) {
+			System.out.println("SERVER: I/O error: " + e.getMessage());
+		}
 	}
 
 
