@@ -131,68 +131,69 @@ public class Protocol {
 	public void readAndSend() throws IOException { 
 		BufferedReader reader = new BufferedReader(new FileReader(inputFile));
 
-    // Skip lines already sent
-    for (int i = 0; i < sentReadings; i++) {
-        reader.readLine();
-    }
+		// skip csv lines already done
+		for (int i = 0; i < sentReadings; i++) {
+			reader.readLine();
+		}
 
-    // Read up to maxPatchSize readings for this Data segment
-    StringBuilder payloadBuilder = new StringBuilder();
-    int count = 0;
-    String line;
+		// limit at maxpatchsize
+		StringBuilder payloadBuilder = new StringBuilder();
+		int count = 0;
+		String line;
 
-    while (count < maxPatchSize && (line = reader.readLine()) != null) {
-        String[] parts = line.split(",");
-        if (parts.length < 5) continue;
+		//split line by commas and into various args
+		while (count < maxPatchSize && (line = reader.readLine()) != null) {
+			String[] parts = line.split(",");
+			if (parts.length < 5) continue;
 
-        String sensorId = parts[0];
-        long timestamp = Long.parseLong(parts[1]);
-        float[] values = new float[3];
-        values[0] = Float.parseFloat(parts[2]);
-        values[1] = Float.parseFloat(parts[3]);
-        values[2] = Float.parseFloat(parts[4]);
+			String sensorId = parts[0];
+			long timestamp = Long.parseLong(parts[1]);
+			float[] values = new float[3];
+			values[0] = Float.parseFloat(parts[2]);
+			values[1] = Float.parseFloat(parts[3]);
+			values[2] = Float.parseFloat(parts[4]);
 
-        Reading reading = new Reading(sensorId, timestamp, values);
+			//reading object
+			Reading reading = new Reading(sensorId, timestamp, values);
 
-        if (count > 0) payloadBuilder.append(";");
-        payloadBuilder.append(reading.toString());
-        count++;
-    }
+			if (count > 0) payloadBuilder.append(";");
+			payloadBuilder.append(reading.toString());
+			count++;
+		}
 
-    reader.close();
+		reader.close();
+		//if no readings found terminate 
+		if (count == 0) {
+			System.out.println("CLIENT: No more readings to send. Transfer complete.");
+			System.out.println("Total segments: " + totalSegments);
+			System.exit(0);
+		}
 
-    if (count == 0) {
-        System.out.println("CLIENT: No more readings to send. Transfer complete.");
-        System.out.println("Total segments: " + totalSegments);
-        System.exit(0);
-    }
-
-    // Build the Data segment
-    dataSeg = new Segment(seqNum, SegmentType.Data, payloadBuilder.toString(), payloadBuilder.length());
+		//build the data segment
+		dataSeg = new Segment(seqNum, SegmentType.Data, payloadBuilder.toString(), payloadBuilder.length());
 
 
-    // Serialize and send
-    ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
-    ObjectOutputStream os = new ObjectOutputStream(byteStream);
-    os.writeObject(dataSeg);
-    os.flush();
-    byte[] sendData = byteStream.toByteArray();
-    DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, ipAddress, portNumber);
-    socket.send(sendPacket);
-    os.close();
-    byteStream.close();
+		// serialise and send
+		ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+		ObjectOutputStream os = new ObjectOutputStream(byteStream);
+		os.writeObject(dataSeg);
+		os.flush();
+		byte[] sendData = byteStream.toByteArray();
+		DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, ipAddress, portNumber);
+		socket.send(sendPacket);
+		os.close();
+		byteStream.close();
 
-    // Update counters
-    totalSegments++;
-    sentReadings += count;
+		// update counters
+		totalSegments++;
+		sentReadings += count;
 
-    // Print progress (as per spec Appendix 2)
-    System.out.println("CLIENT: Send: DATA [SEQ#" + dataSeg.getSeqNum() + "]"
-            + "(size:" + dataSeg.getSize()
-            + ", crc:" + dataSeg.getChecksum()
-            + ", content:" + dataSeg.getPayLoad() + ")");
-    System.out.println("------------------------------------------------------------------");
-}
+		// print progress
+		System.out.println("CLIENT: Send: DATA [SEQ#" + dataSeg.getSeqNum() + "]"
+				+ "(size:" + dataSeg.getSize()
+				+ ", crc:" + dataSeg.getChecksum()
+				+ ", content:" + dataSeg.getPayLoad() + ")");
+	}
 	
 
 	/* 
@@ -200,56 +201,54 @@ public class Protocol {
 	 * See coursework specification for full details.
 	 */
 	public boolean receiveAck() throws IOException { 
-		
-    try {
-        // 1. Prepare to receive the ACK packet
-        byte[] buffer = new byte[1024];
-        DatagramPacket receivePacket = new DatagramPacket(buffer, buffer.length);
+		try {
+			// prepare to receive Ack
+			byte[] buffer = new byte[1024];
+			DatagramPacket receivePacket = new DatagramPacket(buffer, buffer.length);
 
-        // 2. Wait for ACK from the server
-        socket.receive(receivePacket);
+			socket.receive(receivePacket);
 
-        // 3. Deserialize the received bytes into a Segment object
-        ByteArrayInputStream byteStream = new ByteArrayInputStream(receivePacket.getData());
-        ObjectInputStream is = new ObjectInputStream(byteStream);
-        ackSeg = (Segment) is.readObject();
-        is.close();
-        byteStream.close();
+			// reconstrut byte stream into Segment object
+			ByteArrayInputStream byteStream = new ByteArrayInputStream(receivePacket.getData());
+			ObjectInputStream is = new ObjectInputStream(byteStream);
+			ackSeg = (Segment) is.readObject();
+			is.close();
+			byteStream.close();
 
-        // 4. Check that it is indeed an ACK segment
-        if (ackSeg.getType() != SegmentType.Ack) {
-            System.out.println("CLIENT: Received unexpected segment type. Expected ACK.");
-            return false;
-        }
+			// check that it is indeed an ACK segment
+			if (ackSeg.getType() != SegmentType.Ack) {
+				System.out.println("CLIENT: Received unexpected segment type. Expected ACK.");
+				return false;
+			}
 
-        // 5. Verify sequence number
-        if (ackSeg.getSeqNum() != seqNum) {
-            System.out.println("CLIENT: Received ACK with wrong sequence number. Expected " + seqNum + " but got " + ackSeg.getSeqNum());
-            return false;
-        }
+			// verify seqNum
+			if (ackSeg.getSeqNum() != seqNum) {
+				System.out.println("CLIENT: Received ACK with wrong sequence number. Expected " + seqNum + " but got " + ackSeg.getSeqNum());
+				return false;
+			}
 
-        // 6. Print confirmation (matches example output)
-        System.out.println("CLIENT: RECIEVE: ACK [SEQ#" + ackSeg.getSeqNum() + "]");
-        System.out.println("***************************************************************************************************");
+			// print confirmation 
+			System.out.println("CLIENT: RECIEVE: ACK [SEQ#" + ackSeg.getSeqNum() + "]");
+			System.out.println("***************************************************************************************************");
 
-        // 7. Check if this was the final ACK (all readings acknowledged)
-        if (sentReadings >= fileTotalReadings) {
-            System.out.println("Total segments: " + totalSegments);
-            System.exit(0);
-        }
+			// check if this was the final ACK 
+			if (sentReadings >= fileTotalReadings) {
+				System.out.println("Total segments: " + totalSegments);
+				System.exit(0);
+			}
 
-        // 8. Alternate sequence number for next data segment (1 → 0 → 1 …)
-        seqNum = 1 - seqNum;
+			// alternate seq num
+			seqNum = 1 - seqNum;
 
-        return true;
+			return true;
 
-    } catch (ClassNotFoundException e) {
-        System.out.println("CLIENT: Error deserializing ACK segment: " + e.getMessage());
-        return false;
-    } catch (IOException e) {
-        System.out.println("CLIENT: Error receiving ACK segment: " + e.getMessage());
-        return false;
-    }
+		} catch (ClassNotFoundException e) {
+			System.out.println("CLIENT: Error deserializing ACK segment: " + e.getMessage());
+			return false;
+		} catch (IOException e) {
+			System.out.println("CLIENT: Error receiving ACK segment: " + e.getMessage());
+			return false;
+		}
 	}
 
 	/* 
