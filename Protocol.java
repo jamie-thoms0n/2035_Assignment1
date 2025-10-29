@@ -15,6 +15,7 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 
 public class Protocol {
@@ -237,7 +238,7 @@ public class Protocol {
 				System.exit(0);
 			}
 
-			// alternate seq num
+			// alternate sequence num
 			seqNum = 1 - seqNum;
 
 			return true;
@@ -245,6 +246,8 @@ public class Protocol {
 		} catch (ClassNotFoundException e) {
 			System.out.println("CLIENT: Error deserializing ACK segment: " + e.getMessage());
 			return false;
+		} catch (SocketTimeoutException e) {
+			throw e; // let the outer method handle timeouts
 		} catch (IOException e) {
 			System.out.println("CLIENT: Error receiving ACK segment: " + e.getMessage());
 			return false;
@@ -255,9 +258,51 @@ public class Protocol {
 	 * This method starts a timer and does re-transmission of the Data segment 
 	 * See coursework specification for full details.
 	 */
-	public void startTimeoutWithRetransmission()   {  
-		System.exit(0);
-	}
+	public void startTimeoutWithRetransmission()  throws IOException {  
+		// 1. Configure the socket timeout
+    socket.setSoTimeout(timeout);
+
+    while (true) {
+        try {
+            // 2. Wait for ACK using existing receiveAck() logic
+            if (receiveAck()) {
+                // ACK received correctly
+                currRetry = 0;              // reset retry counter
+                socket.setSoTimeout(0);     // reset to no timeout
+                return;                     // move on to next segment
+            } 
+            else {
+                // ACK arrived but with wrong sequence number
+                System.out.println("CLIENT: Invalid ACK sequence. Waiting again...");
+            }
+
+        } catch (SocketTimeoutException e) {
+            // 3. Timeout expired → retransmit the same Data segment
+            currRetry++;
+            if (currRetry > maxRetries) {
+                System.out.println("CLIENT: ERROR - Maximum retries (" + maxRetries + ") reached. Exiting transfer.");
+                System.exit(0);
+            }
+
+            System.out.println("CLIENT: TIMEOUT ALERT");
+            System.out.println("CLIENT: Re-sending the same segment again, current retry " + currRetry);
+
+            // Re-send the same Data segment (identical seqNum and payload)
+            ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+            ObjectOutputStream os = new ObjectOutputStream(byteStream);
+            os.writeObject(dataSeg);
+            os.flush();
+            byte[] resendData = byteStream.toByteArray();
+            DatagramPacket resendPacket = new DatagramPacket(resendData, resendData.length, ipAddress, portNumber);
+            socket.send(resendPacket);
+            os.close();
+            byteStream.close();
+
+            totalSegments++; // count the retransmission as a new sent segment
+        } 
+    }
+}
+
 
 
 	/* 
