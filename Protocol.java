@@ -71,57 +71,89 @@ public class Protocol {
 	 * This method sends protocol metadata to the server.
 	 * See coursework specification for full details.	
 	 */
-	public void sendMetadata()   { 
-
-    BufferedReader br = null;
-    try {
-        //count total number of readings (lines) in the csv
-        br = new BufferedReader(new FileReader(inputFile));
-        fileTotalReadings = 0;
-        while (br.readLine() != null) {
-            fileTotalReadings++;
-        }
-        br.close();
-
-        //out togetehr metadata payload
-        String payload = fileTotalReadings + "," + outputFileName + "," + maxPatchSize;
-
-        // create Meta segment with seqNum = 0
-        Segment metaSeg = new Segment();
-        metaSeg.setType(SegmentType.Meta);
-        metaSeg.setSeqNum(0);
-        metaSeg.setPayLoad(payload);
-
-        // print status
-        System.out.println("CLIENT: META [SEQ#0] (Number of readings:" + fileTotalReadings
-                + ", file name:" + outputFileName + ", patch size:" + maxPatchSize + ")");
-
-        // sendto server
-
-		ByteArrayOutputStream baos = new ByteArrayOutputStream();
-		ObjectOutputStream oos = new ObjectOutputStream(baos);
-		oos.writeObject(metaSeg);
-		oos.flush();
-		byte[] buf = baos.toByteArray();
-
-		DatagramPacket packet = new DatagramPacket(buf, buf.length, ipAddress, portNumber);
-		socket.send(packet);
 
 
-    } catch (FileNotFoundException e) {
-        System.err.println("CLIENT ERROR: CSV file not found: " + inputFile.getName());
-        if (br != null) {
-            try { br.close(); } catch (IOException ex) {}
-        }
-        System.exit(0);
-    } catch (IOException e) {
-        System.err.println("CLIENT ERROR: Failed to send metadata. " + e.getMessage());
-        try {
-            if (br != null) br.close();
-        } catch (IOException ex) {}
-        System.exit(0);
-    }	
-	} 
+	public void sendMetadata() {
+
+		BufferedReader br = null;
+		try {
+			 // validate inputs
+			if (inputFile == null || !inputFile.exists()) {
+				System.out.println("CLIENT: File does not exists");
+				System.out.println("CLIENT: Exit ..");
+				if (socket != null && !socket.isClosed()) socket.close();
+				System.exit(0);
+			}
+	
+			// Patch size must be >0
+			if (maxPatchSize <= 0) {
+				System.out.println("CLIENT: Invalid patch size (must be > 0). Transfer aborted.");
+				if (socket != null && !socket.isClosed()) socket.close();
+				System.out.println("CLIENT: Exit ..");
+				System.exit(0);
+			}
+	
+			// output file name must be provided
+			if (outputFileName == null || outputFileName.trim().isEmpty()) {
+				System.out.println("CLIENT: Invalid output file name. Transfer aborted.");
+				if (socket != null && !socket.isClosed()) socket.close();
+				System.out.println("CLIENT: Exit ..");
+				System.exit(0);
+			}
+	
+			// count number of readings
+			br = new BufferedReader(new FileReader(inputFile));
+			fileTotalReadings = 0;
+			String line;
+			while ((line = br.readLine()) != null) {
+				// Ignore empty lines to avoid mis-counting blank entries
+				if (!line.trim().isEmpty()) {
+					fileTotalReadings++;
+				}
+			}
+			br.close();
+	
+			// if no readings found, abort transfer
+			if (fileTotalReadings == 0) {
+				System.out.println("CLIENT: CSV file is empty. No readings to send. Transfer aborted.");
+				if (socket != null && !socket.isClosed()) socket.close();
+				System.out.println("CLIENT: Exit ..");
+				System.exit(0);
+			}
+	
+			 //assemble payload and make segment
+			String payload = fileTotalReadings + "," + outputFileName + "," + maxPatchSize;
+	
+			Segment metaSeg = new Segment();
+			metaSeg.setType(SegmentType.Meta);
+			metaSeg.setSeqNum(0);
+			metaSeg.setPayLoad(payload);
+	
+			 //print status and send
+			System.out.println("CLIENT: META [SEQ#0] (Number of readings:" + fileTotalReadings
+					+ ", file name:" + outputFileName + ", patch size:" + maxPatchSize + ")");
+	
+			ByteArrayOutputStream baos = new ByteArrayOutputStream();
+			ObjectOutputStream oos = new ObjectOutputStream(baos);
+			oos.writeObject(metaSeg);
+			oos.flush();
+			byte[] buf = baos.toByteArray();
+	
+			DatagramPacket packet = new DatagramPacket(buf, buf.length, ipAddress, portNumber);
+			socket.send(packet);
+	
+		} catch (FileNotFoundException e) {
+			System.err.println("CLIENT ERROR: CSV file not found: " + inputFile.getName());
+			try { if (br != null) br.close(); } catch (IOException ignore) {}
+			System.exit(0);
+	
+		} catch (IOException e) {
+			System.err.println("CLIENT ERROR: Failed to send metadata. " + e.getMessage());
+			try { if (br != null) br.close(); } catch (IOException ignore) {}
+			System.exit(0);
+		}
+	}
+	
 
 
 	/* 
