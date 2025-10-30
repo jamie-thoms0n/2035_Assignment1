@@ -1,7 +1,21 @@
 /*
- * Replace the following string of 0s with your student number
- * 000000000
+ * Student number below:
+ * 240524797
  */
+/*Declaration of AI use:
+ * 
+ * I did use AI, ChatGPT, to aid me through this assignment - only to the extent I was permitted by the spec.
+ * I DID NOT EVER:
+ * - take any code from the AI
+ * - Put any code into the AI
+ * I put the assignment spec document into the AI, and used the AI to help structure how I tackled the assignment. 
+ * By providing the AI with this document it was very aware that it could not output any code at all - as it states
+ * this in the document. I also gave it tailored instructions for within that project to never output any code.
+ */
+
+
+
+
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -93,7 +107,7 @@ public class Protocol {
 				System.exit(0);
 			}
 	
-			// output file name must be provided
+			// check output file name
 			if (outputFileName == null || outputFileName.trim().isEmpty()) {
 				System.out.println("CLIENT: Invalid output file name. Transfer aborted.");
 				if (socket != null && !socket.isClosed()) socket.close();
@@ -106,7 +120,7 @@ public class Protocol {
 			fileTotalReadings = 0;
 			String line;
 			while ((line = br.readLine()) != null) {
-				// Ignore empty lines to avoid mis-counting blank entries
+				//ignore empty lines to avoid mis-counting
 				if (!line.trim().isEmpty()) {
 					fileTotalReadings++;
 				}
@@ -131,7 +145,7 @@ public class Protocol {
 	
 			 //print status and send
 			System.out.println("CLIENT: META [SEQ#0] (Number of readings:" + fileTotalReadings
-					+ ", file name:" + outputFileName + ", patch size:" + maxPatchSize + ")");
+					+ ", patch size:" + maxPatchSize + ", file name: " + outputFileName + ")");
 	
 			ByteArrayOutputStream baos = new ByteArrayOutputStream();
 			ObjectOutputStream oos = new ObjectOutputStream(baos);
@@ -162,12 +176,12 @@ public class Protocol {
 	public void readAndSend() throws IOException {
 		BufferedReader reader = new BufferedReader(new FileReader(inputFile));
 	
-		// Skip readings already sent
+		//skip readings already sent
 		for (int i = 0; i < sentReadings; i++) {
 			reader.readLine();
 		}
 	
-		// Prepare payload builder for up to maxPatchSize readings
+		// prepare payload builder for up to maxPatchSize readings
 		StringBuilder payloadBuilder = new StringBuilder();
 		int count = 0;
 		String line;
@@ -183,7 +197,7 @@ public class Protocol {
 			values[1] = Float.parseFloat(parts[3]);
 			values[2] = Float.parseFloat(parts[4]);
 	
-			// Create Reading object
+			// create Reading object
 			Reading reading = new Reading(sensorId, timestamp, values);
 	
 			if (count > 0) payloadBuilder.append(";");
@@ -192,27 +206,23 @@ public class Protocol {
 		}
 		reader.close();
 	
-		// If no more readings left, finish cleanly
+		// if no more readings left, finish cleanly
 		if (count == 0) {
 			System.out.println("CLIENT: No more readings to send. Transfer complete.");
 			System.out.println("Total segments: " + totalSegments);
 			System.exit(0);
 		}
 	
-		// -----------------------------------------
-		// Determine sequence number dynamically
-		// -----------------------------------------
+		// determine sseqNum dynamically
 		int nextSeq = 1; // first DATA segment always starts with 1 after META
 		if (ackSeg != null) {
 			nextSeq = (ackSeg.getSeqNum() == 1) ? 0 : 1; // toggle based on last ACK
 		}
 	
-		// Build the Data segment
+		// build the seg
 		dataSeg = new Segment(nextSeq, SegmentType.Data, payloadBuilder.toString(), payloadBuilder.length());
 	
-		// -----------------------------------------
-		// Send the Data segment
-		// -----------------------------------------
+		// send the seg
 		ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
 		ObjectOutputStream os = new ObjectOutputStream(byteStream);
 		os.writeObject(dataSeg);
@@ -228,7 +238,7 @@ public class Protocol {
 		totalSegments++;       // track total sent segments
 		sentReadings += count; // increment readings sent
 	
-		// Print confirmation
+		// print confirmation
 		System.out.println("------------------------------------------------------------------");
 		System.out.println("CLIENT: Send: DATA [SEQ#" + dataSeg.getSeqNum() + "]"
 				+ "(size:" + dataSeg.getSize()
@@ -243,43 +253,40 @@ public class Protocol {
 	 */
 	public boolean receiveAck() throws IOException {
 		try {
-			// Prepare to receive ACK
+			// prepare to receive ACK
 			byte[] buffer = new byte[1024];
 			DatagramPacket receivePacket = new DatagramPacket(buffer, buffer.length);
 			socket.receive(receivePacket);
 	
-			// Reconstruct byte stream into Segment object
+			// reconstruct byte stream into Segment object
 			ByteArrayInputStream byteStream = new ByteArrayInputStream(receivePacket.getData());
 			ObjectInputStream is = new ObjectInputStream(byteStream);
 			ackSeg = (Segment) is.readObject();
 			is.close();
 			byteStream.close();
 	
-			// Check that it is indeed an ACK segment
+			// check that it is ACK segment
 			if (ackSeg.getType() != SegmentType.Ack) {
 				System.out.println("CLIENT: Received unexpected segment type. Expected ACK.");
 				return false;
 			}
 	
-			// Verify seqNum matches the last DATA segment sent
+			// verify seqNum matches
 			if (ackSeg.getSeqNum() != dataSeg.getSeqNum()) {
 				System.out.println("CLIENT: Received ACK with wrong sequence number. Expected " 
 									+ dataSeg.getSeqNum() + " but got " + ackSeg.getSeqNum());
 				return false;
 			}
 	
-			// Print confirmation
+			// print confirmation
 			System.out.println("CLIENT: RECEIVE: ACK [SEQ#" + ackSeg.getSeqNum() + "]");
 			System.out.println("***************************************************************************************************");
 	
-			// If this was the final ACK, end transfer
+			//if final ACK, end transfer
 			if (sentReadings >= fileTotalReadings) {
 				System.out.println("Total segments: " + totalSegments);
 				System.exit(0);
 			}
-	
-			// No need to flip seqNum here — next DATA segment’s seqNum will be derived
-			// dynamically in readAndSend() based on this ACK
 	
 			return true;
 	
@@ -300,25 +307,22 @@ public class Protocol {
 	 * See coursework specification for full details.
 	 */
 	public void startTimeoutWithRetransmission()  throws IOException {  
-		// 1. Configure the socket timeout
+		// config the socket timeout
     socket.setSoTimeout(timeout);
 
     while (true) {
         try {
-            // 2. Wait for ACK using existing receiveAck() logic
-            if (receiveAck()) {
-                // ACK received correctly
-                currRetry = 0;              // reset retry counter
-                socket.setSoTimeout(0);     // reset to no timeout
-                return;                     // move on to next segment
+            if (receiveAck()) {            
+                currRetry = 0;
+                socket.setSoTimeout(0); 
+                return;
             } 
             else {
-                // ACK arrived but with wrong sequence number
                 System.out.println("CLIENT: Invalid ACK sequence. Waiting again...");
             }
 
         } catch (SocketTimeoutException e) {
-            // 3. Timeout expired → retransmit the same Data segment
+            // timeout expired so retransmit the same Data segment
             currRetry++;
             if (currRetry > maxRetries) {
                 System.out.println("CLIENT: ERROR - Maximum retries (" + maxRetries + ") reached. Exiting transfer.");
@@ -327,8 +331,15 @@ public class Protocol {
 
             System.out.println("CLIENT: TIMEOUT ALERT");
             System.out.println("CLIENT: Re-sending the same segment again, current retry " + currRetry);
+			System.out.println("------------------------------------------------------------------");
+			System.out.println("CLIENT: Send: DATA [SEQ#" + dataSeg.getSeqNum() + "]"
+					+ "(size:" + dataSeg.getSize()
+					+ ", crc:" + dataSeg.calculateChecksum()
+					+ ", content:" + dataSeg.getPayLoad() + ")");
+			System.out.println("------------------------------------------------------------------");
 
-            // Re-send the same Data segment (identical seqNum and payload)
+
+            // re-send the same Data segment
             ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
             ObjectOutputStream os = new ObjectOutputStream(byteStream);
             os.writeObject(dataSeg);
@@ -351,19 +362,19 @@ public class Protocol {
 	 * See coursework specification for full details.
 	 */
 	public void receiveWithAckLoss(DatagramSocket serverSocket, float loss)  {
-		int expectedSeqNum = 1;        // expect first DATA segment after META to be 1
-		int lastAckedSeqNum = 0;       // last valid DATA seq number
-		long totalBytesReceived = 0;   // includes retransmissions
-		long totalUsefulBytes = 0;     // only unique DATA
+		int expectedSeqNum = 1;
+		int lastAckedSeqNum = 0;
+		long totalBytesReceived = 0;
+		long totalUsefulBytes = 0;
 		java.util.List<String> receivedLines = new java.util.ArrayList<>();
 	
 		try {
-			// 1. Exit after 2000 ms of no data
+			// exit after 2000 ms of no data
 			serverSocket.setSoTimeout(2000);
 	
 			while (true) {
 				try {
-					// 2. Receive a DATA segment
+					// receive a seg
 					byte[] buffer = new byte[MAX_Segment_SIZE];
 					DatagramPacket pkt = new DatagramPacket(buffer, buffer.length);
 					serverSocket.receive(pkt);
@@ -393,9 +404,22 @@ public class Protocol {
 					int clientPort = pkt.getPort();
 	
 					if (seg.getSeqNum() == expectedSeqNum) {
-						// --- NEW segment ---
-						receivedLines.add(seg.getPayLoad());
+						// split readings on ';'
+						String[] readings = seg.getPayLoad().split(";");
+						int numReadings = readings.length;
+					
+						// sdd seg header line
+						receivedLines.add("Segment [" + seg.getSeqNum() + "] has " + numReadings + " Readings");
+					
+						// add each reading to own line
+						for (String r : readings) {
+							receivedLines.add(r.trim());
+						}
+					
+						receivedLines.add("");
+					
 						totalUsefulBytes += seg.getSize();
+					
 	
 						if (!isLost(loss)) {
 							Server.sendAck(serverSocket, clientAddr, clientPort, seg.getSeqNum());
@@ -406,9 +430,9 @@ public class Protocol {
 						}
 	
 						lastAckedSeqNum = seg.getSeqNum();
-						expectedSeqNum = 1 - expectedSeqNum;   // alternate 1↔0
+						expectedSeqNum = 1 - expectedSeqNum;   // alternate 1,0
 					} else {
-						// --- DUPLICATE segment ---
+						// DUPLICATE segment
 						System.out.println("SERVER: Duplicate DATA [SEQ#" + seg.getSeqNum() + "] detected");
 						System.out.println("SERVER: Re-sending ACK [SEQ#" + lastAckedSeqNum + "] (may be lost)");
 	
@@ -422,7 +446,7 @@ public class Protocol {
 					}
 	
 				} catch (java.net.SocketTimeoutException e) {
-					// --- 3. End of transfer ---
+					// end of transfer
 					if (!receivedLines.isEmpty()) {
 						Server.writeReadingsToFile(receivedLines, outputFileName);
 					}
